@@ -21,9 +21,9 @@ func newConfig() *config {
 	return &c
 }
 
-// getConfigs loads the configurations from the file named 
-// "config.json" in the same directory as the executable. 
-func getConfigs() (*config,  error) {
+// getConfigs loads the configurations from the file named
+// "config.json" in the same directory as the executable.
+func getConfigs() (*config, error) {
 	configFile, err := os.Open("config.json")
 	config := newConfig()
 	if err != nil {
@@ -37,10 +37,10 @@ func getConfigs() (*config,  error) {
 
 func main() {
 	configs, err := getConfigs()
-	if err != nil{
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config.json: %v\n", err)
 		fmt.Printf("Using default configurations\n")
 	}
-	fmt.Fprintf(os.Stdout,"Configs: %v", configs)
-	
+	fmt.Fprintf(os.Stdout, "Configs: %v", configs)
+
 }
