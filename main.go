@@ -58,7 +58,7 @@ func newTransactionTDA(r []string) (*transaction, error) {
 	}
 
 	dtFormat := "01/02/2006"
-	transactionDt, err :=  time.Parse(dtFormat,r[0])
+	transactionDt, err := time.Parse(dtFormat, r[0])
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func newTransactionTDA(r []string) (*transaction, error) {
 		Commission:  commission,
 		Amount:      amount}
 
-	return &t, nil 
+	return &t, nil
 
 }
 
@@ -129,8 +129,8 @@ func loadTransactions(c *config) ([]*transaction, error) {
 			continue
 		}
 		nextTransaction, err := newTransactionTDA(record)
-		if err != nil{
-			fmt.Fprintf(os.Stderr,"Skipping invalid transaction due to: %v\n",err)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Skipping invalid transaction due to: %v\n", err)
 		}
 		transactions = append(transactions, nextTransaction)
 	}
@@ -189,37 +189,35 @@ func groupRelatedSymbols(groupedTransactions map[string][]*transaction) (results
 	return results
 }
 
-// getEffectiveCostBasis computes the effective cost basis for all symbols that currently have 
-// an open position. 
+// getEffectiveCostBasis computes the effective cost basis for all symbols that currently have
+// an open position.
 //
 // this is achieved by first computing the cost basis of the shares position from the purchase
-// of the shares, then applying any profits/losses from transactions on related symbols. 
+// of the shares, then applying any profits/losses from transactions on related symbols.
 //
 // for example, take a position of 100 AMD shares bought at $70. initial cost basis is $7000
 // if there are transactions for a covered call AMD $75c that total a profit of $100, this function
-// would compute the effective cost basis of the AMD shares as being $6900. 
-// 
+// would compute the effective cost basis of the AMD shares as being $6900.
+//
 // currently, this function ignores shares positions that have been closed.
-func getEffectiveCostBasis(relatedSymbols map[string][]string, groupedTransactions map[string][]*transaction){
-	// TODO return some kind of struct or list of structs representing effective cost basis' 
+func getEffectiveCostBasis(relatedSymbols map[string][]string, groupedTransactions map[string][]*transaction) {
+	// TODO return some kind of struct or list of structs representing effective cost basis'
 	// TODO make this compute effective cost basis on open and on closed positions
 	fmt.Println("Computing effective cost basis of open positions")
 	for symbol, _ := range relatedSymbols {
 		// first check to see if the symbol position is closed out
 		position := big.NewFloat(0.0)
 		symbolTransactions := groupedTransactions[symbol]
-		for i:=0; i< len(symbolTransactions); i++ {
+		for i := 0; i < len(symbolTransactions); i++ {
 			transaction := symbolTransactions[i]
-			if transaction == nil{
-				fmt.Fprintf(os.Stderr,"Skipping invalid symbol %v", symbol)
+			if transaction == nil {
+				fmt.Fprintf(os.Stderr, "Skipping invalid symbol %v", symbol)
 				continue
 			}
 			isBuy := strings.HasPrefix(transaction.Description, "Bought")
 			if isBuy {
-				fmt.Fprintf(os.Stdout, "\t%v BUY: %v\n", transaction.Symbol, transaction.Quantity)
-				position = position.Add(position,transaction.Quantity)
+				position = position.Add(position, transaction.Quantity)
 			} else {
-				fmt.Fprintf(os.Stdout, "\t%v SELL: %v\n", transaction.Symbol, transaction.Quantity)
 				position = position.Sub(position, transaction.Quantity)
 			}
 		}
