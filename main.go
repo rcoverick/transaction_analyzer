@@ -157,6 +157,28 @@ func groupSymbols(trans []*transaction)(map[string][]*transaction){
 	return results
 }
 
+// groupRelatedSymbols is used to identify related options and underlying symbols. 
+//
+// returns a mapping of symbols to a list of related symbols 
+// found in the input grouping of transactions. 
+func groupRelatedSymbols(groupedTransactions map[string][]*transaction) (results map[string][]string){
+	results = make(map[string][]string) 
+
+	for s := range groupedTransactions{
+		relatedSymbols := make([]string, 0)
+		for symbol := range groupedTransactions {
+			if symbol != s && strings.HasPrefix(symbol, s+" "){
+				relatedSymbols = append(relatedSymbols, symbol)
+			} 
+		}
+		if len(relatedSymbols) > 0 {
+			results[s] = relatedSymbols
+		}
+	}
+	
+	return results
+}
+
 func main() {
 	configs, err := getConfigs()
 	if err != nil {
@@ -174,7 +196,19 @@ func main() {
 
 	fmt.Fprintf(os.Stdout, "Symbol : total transactions\n")
 
+
 	for k, t := range groupedSymbols {
 		fmt.Fprintf(os.Stdout, "\t%v : %v\n", k, len(t))
 	}
+
+	relatedSymbols := groupRelatedSymbols(groupedSymbols)
+
+	fmt.Fprintf(os.Stdout, "Related Symbols\n")
+	for symbol, relatedSymbols := range relatedSymbols {
+		fmt.Fprintf(os.Stdout, "%v:\n", symbol)
+		for r := 0; r<len(relatedSymbols); r++ {
+			fmt.Fprintf(os.Stdout, "\t%v\n", relatedSymbols[r])
+		}
+	}
+
 }
