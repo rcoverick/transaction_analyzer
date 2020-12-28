@@ -71,6 +71,10 @@ func newTransactionTDA(r []string) (*transaction, error) {
 		Price:       price,
 		Commission:  commission,
 		Amount:      amount}
+	// make quantity negative if not a 'buy' transaction
+	if !strings.HasPrefix(t.Description, "Bought") {
+		t.Quantity.Neg(quantity)
+	}
 
 	return &t, nil
 
@@ -189,6 +193,47 @@ func groupRelatedSymbols(groupedTransactions map[string][]*transaction) (results
 	return results
 }
 
+type effCostBasis struct {
+	Symbol        string
+	TotalPosition *big.Float // total open position
+	TotalPL       *big.Float
+	Transactions  []*transaction
+}
+
+// newEffCostBasis returns a pointer to a new struct for details about
+// the effective cost basis of a symbol given the symbol and a list
+// of transactions.
+//
+// as part of the construction, the open position amount and total P/L
+// is computed.
+func newEffCostBasis(symbol string, trans []*transaction) *effCostBasis {
+	e := effCostBasis{
+		Symbol:       symbol,
+		Transactions: trans,
+	}
+
+	openPos := big.NewFloat(0.0)
+	totalPL := big.NewFloat(0.0)
+	for i := 0; i < len(trans); i++ {
+		t := trans[i]
+		if t != nil {
+			openPos = openPos.Add(openPos, t.Quantity)
+			totalPL = totalPL.Add(totalPL, t.Amount)
+		}
+	}
+	e.TotalPosition = openPos
+	e.TotalPL = totalPL
+
+	return &e
+}
+
+// getAvgCost returns the average price of each open unit of the position.
+func (e *effCostBasis) getAvgCost() *big.Float {
+	avgCost := big.NewFloat(0.0)
+	avgCost = avgCost.Quo(e.TotalPL, e.TotalPosition)
+	return avgCost
+}
+
 // getEffectiveCostBasis computes the effective cost basis for all symbols that currently have
 // an open position.
 //
@@ -214,54 +259,29 @@ func getEffectiveCostBasis(relatedSymbols map[string][]string, groupedTransactio
 	// TODO make this compute effective cost basis on open and on closed positions
 	fmt.Println("Computing effective cost basis of open positions")
 	for symbol, relatedSymbols := range relatedSymbols {
-		// first check to see if the symbol position is closed out
-		position := big.NewFloat(0.0)
-		costBasis := big.NewFloat(0.0)
 		symbolTransactions := groupedTransactions[symbol]
-		for i := 0; i < len(symbolTransactions); i++ {
-			transaction := symbolTransactions[i]
-			if transaction == nil {
-				continue
-			}
-			isBuy := strings.HasPrefix(transaction.Description, "Bought")
-			if isBuy {
-				position = position.Add(position, transaction.Quantity)
-			} else {
-				position = position.Sub(position, transaction.Quantity)
-			}
-			// since a transaction amount is signed, only add to cost basis
-			costBasis = costBasis.Add(costBasis, transaction.Amount)
-		}
-
-		if position.Cmp(big.NewFloat(0.0)) == 0 {
+		effCB := newEffCostBasis(symbol, symbolTransactions)
+		if effCB.TotalPosition.Cmp(big.NewFloat(0.0)) == 0 {
 			continue // position is closed
 		}
-		fmt.Fprintf(os.Stdout, "%v open position: %v\n", symbol, position)
-		fmt.Fprintf(os.Stdout, "\tcost basis of open position: %v\n", costBasis)
-		avgSharePrice := big.NewFloat(0.0)
-		avgSharePrice = avgSharePrice.Quo(costBasis, position)
-		fmt.Fprintf(os.Stdout, "\tavg share price of open position before computing options P/L: %v\n", avgSharePrice)
+		fmt.Fprintf(os.Stdout, "%v open position: %v\n", effCB.Symbol, effCB.TotalPosition)
+		fmt.Fprintf(os.Stdout, "\tcost basis of open position: %v\n", effCB.TotalPL)
+		fmt.Fprintf(os.Stdout, "\tavg share price of open position before computing options P/L: %v\n", effCB.getAvgCost())
+
 		// compute total P/L from related tickers
 		totalRelatedPL := big.NewFloat(0.0)
 		for relatedSymbolIdx := 0; relatedSymbolIdx < len(relatedSymbols); relatedSymbolIdx++ {
 			relatedSymbol := relatedSymbols[relatedSymbolIdx]
 			transactions := groupedTransactions[relatedSymbol]
-			pl := big.NewFloat(0.0)
-			for t := 0; t < len(transactions); t++ {
-				transaction := transactions[t]
-				if transaction == nil {
-					continue
-				}
-				pl = pl.Add(pl, transaction.Amount)
-			}
-			fmt.Fprintf(os.Stdout, "\tP/L from %v: %v\n", relatedSymbol, pl)
-			totalRelatedPL = totalRelatedPL.Add(totalRelatedPL, pl)
+			relatedEffCB := newEffCostBasis(relatedSymbol, transactions)
+			fmt.Fprintf(os.Stdout, "\tP/L from %v: %v\n", relatedEffCB.Symbol, relatedEffCB.TotalPL)
+			totalRelatedPL = totalRelatedPL.Add(totalRelatedPL, relatedEffCB.TotalPL)
 		}
 		fmt.Fprintf(os.Stdout, "\ttotal P/L from related positions: %v\n", totalRelatedPL)
 		effCostBasis := big.NewFloat(0.0)
-		effCostBasis = effCostBasis.Add(costBasis, totalRelatedPL)
+		effCostBasis = effCostBasis.Add(effCB.TotalPL, totalRelatedPL)
 		effAvgSharePrice := big.NewFloat(0.0)
-		effAvgSharePrice = effAvgSharePrice.Quo(effCostBasis, position)
+		effAvgSharePrice = effAvgSharePrice.Quo(effCostBasis, effCB.TotalPosition)
 		fmt.Fprintf(os.Stdout, "\tcost basis of open position including related positions P/L: %v\n", effCostBasis)
 		fmt.Fprintf(os.Stdout, "\tavg share price of open position after computing options P/L: %v\n", effAvgSharePrice.Text('f', 2))
 	}
