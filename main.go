@@ -19,7 +19,7 @@ type config struct {
 	TransactionsFile string `json:"transactionsFile"`
 }
 
-// transaction represents a transaction from a TD Ameritrade 
+// transaction represents a transaction from a TD Ameritrade
 // account transaction log.
 type transaction struct {
 	Date        string
@@ -30,8 +30,6 @@ type transaction struct {
 	Commission  *big.Float
 	Amount      *big.Float
 }
-
-
 
 // newTransactionTDA constructs a new transaction struct
 // from a csv row in a transaction log downloaded from
@@ -127,28 +125,28 @@ func loadTransactions(c *config) ([]*transaction, error) {
 	return transactions, nil
 }
 
-// groupSymbols organizes a list of transactions by their symbol. 
-// the function returns a map whose key's are the symbol and the 
-// value is a list of pointers to transactions with the same symbol. 
+// groupSymbols organizes a list of transactions by their symbol.
+// the function returns a map whose key's are the symbol and the
+// value is a list of pointers to transactions with the same symbol.
 //
-// this function will ignore transactions with a blank symbol 
-func groupSymbols(trans []*transaction)(map[string][]*transaction){
+// this function will ignore transactions with a blank symbol
+func groupSymbols(trans []*transaction) map[string][]*transaction {
 	var results = make(map[string][]*transaction)
-	for i := 0; i < len(trans); i++{
+	for i := 0; i < len(trans); i++ {
 		var t *transaction = trans[i]
 		trimmedSymbol := strings.TrimSpace(t.Symbol)
-		// guard clause to ignore any blank symbol transactions 
+		// guard clause to ignore any blank symbol transactions
 		if len(trimmedSymbol) == 0 {
-			continue 
+			continue
 		}
 
-		if results[trimmedSymbol] != nil { 
-			// previously found symbol, append this transaction 
+		if results[trimmedSymbol] != nil {
+			// previously found symbol, append this transaction
 			transactionList := results[trimmedSymbol]
 			results[trimmedSymbol] = append(transactionList, t)
 		} else {
 			// first time encountering symbol, make a new entry
-			transactionList :=  make([]*transaction, 1)
+			transactionList := make([]*transaction, 1)
 			transactionList = append(transactionList, t)
 			results[trimmedSymbol] = transactionList
 		}
@@ -157,25 +155,25 @@ func groupSymbols(trans []*transaction)(map[string][]*transaction){
 	return results
 }
 
-// groupRelatedSymbols is used to identify related options and underlying symbols. 
+// groupRelatedSymbols is used to identify related options and underlying symbols.
 //
-// returns a mapping of symbols to a list of related symbols 
-// found in the input grouping of transactions. 
-func groupRelatedSymbols(groupedTransactions map[string][]*transaction) (results map[string][]string){
-	results = make(map[string][]string) 
+// returns a mapping of symbols to a list of related symbols
+// found in the input grouping of transactions.
+func groupRelatedSymbols(groupedTransactions map[string][]*transaction) (results map[string][]string) {
+	results = make(map[string][]string)
 
-	for s := range groupedTransactions{
+	for s := range groupedTransactions {
 		relatedSymbols := make([]string, 0)
 		for symbol := range groupedTransactions {
-			if symbol != s && strings.HasPrefix(symbol, s+" "){
+			if symbol != s && strings.HasPrefix(symbol, s+" ") {
 				relatedSymbols = append(relatedSymbols, symbol)
-			} 
+			}
 		}
 		if len(relatedSymbols) > 0 {
 			results[s] = relatedSymbols
 		}
 	}
-	
+
 	return results
 }
 
@@ -191,11 +189,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error loading transactions: %v", err)
 		os.Exit(1)
 	}
-	
+
 	groupedSymbols := groupSymbols(transactions)
 
 	fmt.Fprintf(os.Stdout, "Symbol : total transactions\n")
-
 
 	for k, t := range groupedSymbols {
 		fmt.Fprintf(os.Stdout, "\t%v : %v\n", k, len(t))
@@ -206,7 +203,7 @@ func main() {
 	fmt.Fprintf(os.Stdout, "Related Symbols\n")
 	for symbol, relatedSymbols := range relatedSymbols {
 		fmt.Fprintf(os.Stdout, "%v:\n", symbol)
-		for r := 0; r<len(relatedSymbols); r++ {
+		for r := 0; r < len(relatedSymbols); r++ {
 			fmt.Fprintf(os.Stdout, "\t%v\n", relatedSymbols[r])
 		}
 	}
