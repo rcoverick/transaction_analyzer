@@ -37,22 +37,22 @@ type transaction struct {
 // TD Ameritrade.
 func newTransactionTDA(r []string) (*transaction, error) {
 
-	quantity, _, err := big.ParseFloat(r[3], 10, 2, big.ToNearestEven)
+	quantity, _, err := big.ParseFloat(r[3], 10, 53, big.ToNearestEven)
 	if err != nil {
 		quantity = big.NewFloat(0) // sane default
 	}
 
-	price, _, err := big.ParseFloat(r[5], 10, 2, big.ToNearestEven)
+	price, _, err := big.ParseFloat(r[5], 10, 53, big.ToNearestEven)
 	if err != nil {
 		price = big.NewFloat(0)
 	}
 
-	commission, _, err := big.ParseFloat(r[6], 10, 2, big.ToNearestEven)
+	commission, _, err := big.ParseFloat(r[6], 10, 53, big.ToNearestEven)
 	if err != nil {
 		commission = big.NewFloat(0)
 	}
 
-	amount, _, err := big.ParseFloat(r[7], 10, 2, big.ToNearestEven)
+	amount, _, err := big.ParseFloat(r[7], 10, 53, big.ToNearestEven)
 	if err != nil {
 		amount = big.NewFloat(0)
 	}
@@ -189,6 +189,48 @@ func groupRelatedSymbols(groupedTransactions map[string][]*transaction) (results
 	return results
 }
 
+// getEffectiveCostBasis computes the effective cost basis for all symbols that currently have 
+// an open position. 
+//
+// this is achieved by first computing the cost basis of the shares position from the purchase
+// of the shares, then applying any profits/losses from transactions on related symbols. 
+//
+// for example, take a position of 100 AMD shares bought at $70. initial cost basis is $7000
+// if there are transactions for a covered call AMD $75c that total a profit of $100, this function
+// would compute the effective cost basis of the AMD shares as being $6900. 
+// 
+// currently, this function ignores shares positions that have been closed.
+func getEffectiveCostBasis(relatedSymbols map[string][]string, groupedTransactions map[string][]*transaction){
+	// TODO return some kind of struct or list of structs representing effective cost basis' 
+	// TODO make this compute effective cost basis on open and on closed positions
+	fmt.Println("Computing effective cost basis of open positions")
+	for symbol, _ := range relatedSymbols {
+		// first check to see if the symbol position is closed out
+		position := big.NewFloat(0.0)
+		symbolTransactions := groupedTransactions[symbol]
+		for i:=0; i< len(symbolTransactions); i++ {
+			transaction := symbolTransactions[i]
+			if transaction == nil{
+				fmt.Fprintf(os.Stderr,"Skipping invalid symbol %v", symbol)
+				continue
+			}
+			isBuy := strings.HasPrefix(transaction.Description, "Bought")
+			if isBuy {
+				fmt.Fprintf(os.Stdout, "\t%v BUY: %v\n", transaction.Symbol, transaction.Quantity)
+				position = position.Add(position,transaction.Quantity)
+			} else {
+				fmt.Fprintf(os.Stdout, "\t%v SELL: %v\n", transaction.Symbol, transaction.Quantity)
+				position = position.Sub(position, transaction.Quantity)
+			}
+		}
+
+		if position.Cmp(big.NewFloat(0.0)) == 0 {
+			continue // position is closed
+		}
+		fmt.Fprintf(os.Stdout, "%v open position: %v\n", symbol, position)
+	}
+}
+
 func main() {
 	configs, err := getConfigs()
 	if err != nil {
@@ -220,4 +262,5 @@ func main() {
 		}
 	}
 
+	getEffectiveCostBasis(relatedSymbols, groupedSymbols)
 }
