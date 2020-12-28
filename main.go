@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"strings"
 )
 
 // config holds configurable values
@@ -18,6 +19,8 @@ type config struct {
 	TransactionsFile string `json:"transactionsFile"`
 }
 
+// transaction represents a transaction from a TD Ameritrade 
+// account transaction log.
 type transaction struct {
 	Date        string
 	Description string
@@ -27,6 +30,8 @@ type transaction struct {
 	Commission  *big.Float
 	Amount      *big.Float
 }
+
+
 
 // newTransactionTDA constructs a new transaction struct
 // from a csv row in a transaction log downloaded from
@@ -122,19 +127,54 @@ func loadTransactions(c *config) ([]*transaction, error) {
 	return transactions, nil
 }
 
+// groupTransactions organizes a list of transactions by their symbol. 
+// the function returns a map whose key's are the symbol and the 
+// value is a list of pointers to transactions with the same symbol. 
+//
+// this function will ignore transactions with a blank symbol 
+func groupTransactions(trans []*transaction)(map[string][]*transaction){
+	var results = make(map[string][]*transaction)
+	for i := 0; i < len(trans); i++{
+		var t *transaction = trans[i]
+		trimmedSymbol := strings.TrimSpace(t.Symbol)
+		// guard clause to ignore any blank symbol transactions 
+		if len(trimmedSymbol) == 0 {
+			continue 
+		}
+
+		if results[trimmedSymbol] != nil { 
+			// previously found symbol, append this transaction 
+			transactionList := results[trimmedSymbol]
+			results[trimmedSymbol] = append(transactionList, t)
+		} else {
+			// first time encountering symbol, make a new entry
+			transactionList :=  make([]*transaction, 1)
+			transactionList = append(transactionList, t)
+			results[trimmedSymbol] = transactionList
+		}
+	}
+
+	return results
+}
+
 func main() {
 	configs, err := getConfigs()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config.json: %v\n", err)
 		fmt.Printf("Using default configurations\n")
 	}
-	fmt.Fprintf(os.Stdout, "Configs: %v", configs)
+
 	transactions, err := loadTransactions(configs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading transactions: %v", err)
 		os.Exit(1)
 	}
-	for i := 0; i < len(transactions); i++ {
-		fmt.Fprintf(os.Stdout, "%v", transactions[i])
+	
+	groupedTransactions := groupTransactions(transactions)
+
+	fmt.Fprintf(os.Stdout, "Symbol : total transactions\n")
+
+	for k, t := range groupedTransactions {
+		fmt.Fprintf(os.Stdout, "\t%v : %v\n", k, len(t))
 	}
 }
