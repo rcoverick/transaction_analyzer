@@ -163,7 +163,7 @@ func groupSymbols(trans []*transaction) map[string][]*transaction {
 		} else {
 			// first time encountering symbol, make a new entry
 			transactionList := make([]*transaction, 1)
-			transactionList = append(transactionList, t)
+			transactionList[0] = t
 			results[trimmedSymbol] = transactionList
 		}
 	}
@@ -285,33 +285,87 @@ func (e *CostBasis) appendCostBasis(cb *CostBasis) {
 // buys/sells
 //
 // currently, this function ignores shares positions that have been closed.
-func getEffectiveCostBasis(relatedSymbols map[string][]string, groupedTransactions map[string][]*transaction) {
-	// TODO return some kind of struct or list of structs representing effective cost basis'
-	// TODO make this compute effective cost basis on open and on closed positions
-	fmt.Println("Computing effective cost basis of open positions")
+func getEffectiveCostBasis(relatedSymbols map[string][]string, groupedTransactions map[string][]*transaction) []*CostBasis {
+	results := make([]*CostBasis, 0)
+	visitedSymbols := make(map[string]bool)
+	// first group up every symbol with related symbols
 	for symbol, relatedSymbols := range relatedSymbols {
+		// guard clause: skip already visited symbols
+		if visitedSymbols[symbol] {
+			continue
+		}
+
 		symbolTransactions := groupedTransactions[symbol]
 		effCB := newCostBasis(symbol, symbolTransactions)
-		if effCB.Position.Cmp(big.NewFloat(0.0)) == 0 {
-			continue // position is closed
-		}
-		fmt.Fprintf(os.Stdout, "%v open position: %v\n", effCB.Symbol, effCB.Position)
-		fmt.Fprintf(os.Stdout, "\tcost basis of open position: %v\n", effCB.PL.Text('f', 2))
-		// fmt.Fprintf(os.Stdout, "\tavg share price of open position before computing options P/L: %v\n", effCB.getAvgCost())
+		visitedSymbols[symbol] = true
 
-		// // compute total P/L from related tickers
-		// totalRelatedPL := big.NewFloat(0.0)
 		for relatedSymbolIdx := 0; relatedSymbolIdx < len(relatedSymbols); relatedSymbolIdx++ {
 			relatedSymbol := relatedSymbols[relatedSymbolIdx]
+			if visitedSymbols[relatedSymbol] {
+				continue
+			}
+			visitedSymbols[relatedSymbol] = true
 			transactions := groupedTransactions[relatedSymbol]
 			relatedEffCB := newCostBasis(relatedSymbol, transactions)
 			effCB.appendCostBasis(relatedEffCB)
-			// fmt.Fprintf(os.Stdout, "\tP/L from %v: %v\n", relatedEffCB.Symbol, relatedEffCB.PL)
-			// totalRelatedPL = totalRelatedPL.Add(totalRelatedPL, relatedEffCB.PL)
 		}
-		fmt.Fprintf(os.Stdout, "\tcost basis of open position including related positions P/L: %v\n", effCB.EffPL.Text('f', 2))
-		fmt.Fprintf(os.Stdout, "\tavg share price of open position after computing options P/L: %v\n", effCB.getEffAvgCost().Text('f', 2))
+		results = append(results, effCB)
 	}
+
+	// find any symbols that weren't included in the related symbols search and add those
+	for symbol, transactions := range groupedTransactions {
+		// guard clause: skip anything we already processed
+		if visitedSymbols[symbol] {
+			continue
+		}
+		effCB := newCostBasis(symbol, transactions)
+		results = append(results, effCB)
+	}
+	return results
+}
+
+type TransactionStats struct {
+	CostBasis             []*CostBasis
+	ProfitablePositionPct *big.Float //percentage of cost basis' that ended up being profitable
+	LargestGainPosition   *CostBasis //the cost basis with the largest profit
+	LargestLossPosition   *CostBasis //the cost basis with the largest loss
+}
+
+func newTransactionStats(cb []*CostBasis) *TransactionStats {
+	ts := TransactionStats{
+		CostBasis: cb,
+	}
+
+	// compute profitability pct
+	totalCostBasis := big.NewFloat(float64(len(cb)))
+	ZERO := big.NewFloat(0.0)
+	ONE := big.NewFloat(1.0)
+	HUNDRED := big.NewFloat(100.0)
+	profitPosPct := big.NewFloat(0.0)
+	var largestGain *CostBasis
+	var largestLoss *CostBasis
+
+	for i := 0; i < len(cb); i++ {
+		position := cb[i]
+		if position.EffPL.Cmp(ZERO) > 0 {
+			profitPosPct = profitPosPct.Add(profitPosPct, ONE)
+		}
+		// only count zero'd out positions towards largest gain/loss
+		if position.Position.Cmp(ZERO) == 0 {
+			if largestGain == nil || position.EffPL.Cmp(largestGain.EffPL) > 0 {
+				largestGain = position
+			}
+			if (largestLoss == nil && position.EffPL.Cmp(ZERO) < 0) || position.EffPL.Cmp(largestLoss.EffPL) < 0 {
+				largestLoss = position
+			}
+		}
+	}
+
+	profitPosPct = profitPosPct.Quo(profitPosPct, totalCostBasis).Mul(profitPosPct, HUNDRED)
+	ts.ProfitablePositionPct = profitPosPct
+	ts.LargestGainPosition = largestGain
+	ts.LargestLossPosition = largestLoss
+	return &ts
 }
 
 func main() {
@@ -329,21 +383,15 @@ func main() {
 
 	groupedSymbols := groupSymbols(transactions)
 
-	fmt.Fprintf(os.Stdout, "Symbol : total transactions\n")
-
-	for k, t := range groupedSymbols {
-		fmt.Fprintf(os.Stdout, "\t%v : %v\n", k, len(t))
-	}
-
 	relatedSymbols := groupRelatedSymbols(groupedSymbols)
 
-	fmt.Fprintf(os.Stdout, "Related Symbols\n")
-	for symbol, relatedSymbols := range relatedSymbols {
-		fmt.Fprintf(os.Stdout, "%v:\n", symbol)
-		for r := 0; r < len(relatedSymbols); r++ {
-			fmt.Fprintf(os.Stdout, "\t%v\n", relatedSymbols[r])
-		}
+	cb := getEffectiveCostBasis(relatedSymbols, groupedSymbols)
+	stats := newTransactionStats(cb)
+	jsonStats, err := json.Marshal(stats)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error serializing output: %v", err)
+		os.Exit(2)
 	}
 
-	getEffectiveCostBasis(relatedSymbols, groupedSymbols)
+	fmt.Fprintf(os.Stdout, "%v", string(jsonStats))
 }
