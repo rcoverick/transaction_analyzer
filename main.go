@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"time"
 )
 
 // config holds configurable values
@@ -22,7 +23,7 @@ type config struct {
 // transaction represents a transaction from a TD Ameritrade
 // account transaction log.
 type transaction struct {
-	Date        string
+	Date        time.Time
 	Description string
 	Quantity    *big.Float
 	Symbol      string
@@ -34,7 +35,7 @@ type transaction struct {
 // newTransactionTDA constructs a new transaction struct
 // from a csv row in a transaction log downloaded from
 // TD Ameritrade.
-func newTransactionTDA(r []string) *transaction {
+func newTransactionTDA(r []string) (*transaction, error) {
 
 	quantity, _, err := big.ParseFloat(r[3], 10, 2, big.ToNearestEven)
 	if err != nil {
@@ -56,15 +57,22 @@ func newTransactionTDA(r []string) *transaction {
 		amount = big.NewFloat(0)
 	}
 
+	dtFormat := "01/02/2006"
+	transactionDt, err :=  time.Parse(dtFormat,r[0])
+	if err != nil {
+		return nil, err
+	}
+
 	t := transaction{
-		Date:        r[0],
+		Date:        transactionDt,
 		Description: r[2],
 		Symbol:      r[4],
 		Quantity:    quantity,
 		Price:       price,
 		Commission:  commission,
 		Amount:      amount}
-	return &t
+
+	return &t, nil 
 
 }
 
@@ -120,7 +128,11 @@ func loadTransactions(c *config) ([]*transaction, error) {
 		if record[0] == "DATE" || record[0] == "***END OF FILE***" {
 			continue
 		}
-		transactions = append(transactions, newTransactionTDA(record))
+		nextTransaction, err := newTransactionTDA(record)
+		if err != nil{
+			fmt.Fprintf(os.Stderr,"Skipping invalid transaction due to: %v\n",err)
+		}
+		transactions = append(transactions, nextTransaction)
 	}
 	return transactions, nil
 }
