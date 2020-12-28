@@ -127,12 +127,12 @@ func loadTransactions(c *config) ([]*transaction, error) {
 	return transactions, nil
 }
 
-// groupTransactions organizes a list of transactions by their symbol. 
+// groupSymbols organizes a list of transactions by their symbol. 
 // the function returns a map whose key's are the symbol and the 
 // value is a list of pointers to transactions with the same symbol. 
 //
 // this function will ignore transactions with a blank symbol 
-func groupTransactions(trans []*transaction)(map[string][]*transaction){
+func groupSymbols(trans []*transaction)(map[string][]*transaction){
 	var results = make(map[string][]*transaction)
 	for i := 0; i < len(trans); i++{
 		var t *transaction = trans[i]
@@ -170,11 +170,11 @@ func main() {
 		os.Exit(1)
 	}
 	
-	groupedTransactions := groupTransactions(transactions)
+	groupedSymbols := groupSymbols(transactions)
 
 	fmt.Fprintf(os.Stdout, "Symbol : total transactions\n")
 
-	for k, t := range groupedTransactions {
+	for k, t := range groupedSymbols {
 		fmt.Fprintf(os.Stdout, "\t%v : %v\n", k, len(t))
 	}
 }
