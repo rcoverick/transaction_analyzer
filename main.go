@@ -355,7 +355,7 @@ func newTransactionStats(cb []*CostBasis) *TransactionStats {
 			if largestGain == nil || position.EffPL.Cmp(largestGain.EffPL) > 0 {
 				largestGain = position
 			}
-			if (largestLoss == nil && position.EffPL.Cmp(ZERO) < 0) || position.EffPL.Cmp(largestLoss.EffPL) < 0 {
+			if (largestLoss == nil || ( position.EffPL.Cmp(ZERO) < 0 && position.EffPL.Cmp(largestLoss.EffPL) < 0)) {
 				largestLoss = position
 			}
 		}
