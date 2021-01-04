@@ -9,7 +9,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
-	"time"
+	"github.com/stonks/trade"
 )
 
 // config holds configurable values
@@ -20,65 +20,6 @@ type config struct {
 	TransactionsFile string `json:"transactionsFile"`
 }
 
-// transaction represents a transaction from a TD Ameritrade
-// account transaction log.
-type transaction struct {
-	Date        time.Time
-	Description string
-	Quantity    *big.Float
-	Symbol      string
-	Price       *big.Float
-	Commission  *big.Float
-	Amount      *big.Float
-}
-
-// newTransactionTDA constructs a new transaction struct
-// from a csv row in a transaction log downloaded from
-// TD Ameritrade.
-func newTransactionTDA(r []string) (*transaction, error) {
-
-	quantity, _, err := big.ParseFloat(r[3], 10, 53, big.ToNearestEven)
-	if err != nil {
-		quantity = big.NewFloat(0) // sane default
-	}
-
-	price, _, err := big.ParseFloat(r[5], 10, 53, big.ToNearestEven)
-	if err != nil {
-		price = big.NewFloat(0)
-	}
-
-	commission, _, err := big.ParseFloat(r[6], 10, 53, big.ToNearestEven)
-	if err != nil {
-		commission = big.NewFloat(0)
-	}
-
-	amount, _, err := big.ParseFloat(r[7], 10, 53, big.ToNearestEven)
-	if err != nil {
-		amount = big.NewFloat(0)
-	}
-
-	dtFormat := "01/02/2006"
-	transactionDt, err := time.Parse(dtFormat, r[0])
-	if err != nil {
-		return nil, err
-	}
-
-	t := transaction{
-		Date:        transactionDt,
-		Description: r[2],
-		Symbol:      r[4],
-		Quantity:    quantity,
-		Price:       price,
-		Commission:  commission,
-		Amount:      amount}
-	// make quantity negative if not a 'buy' transaction
-	if !strings.HasPrefix(t.Description, "Bought") {
-		t.Quantity.Neg(quantity)
-	}
-
-	return &t, nil
-
-}
 
 // newConfig returns a new instance of a
 // config struct with default values populated
@@ -112,7 +53,7 @@ func getConfigs() (*config, error) {
 
 // loadTransactions loads the csv transactions from
 // the file specified in the configs.
-func loadTransactions(c *config) ([]*transaction, error) {
+func loadTransactions(c *config) ([]*trade.Trade, error) {
 	csvFile, err := os.Open(c.TransactionsFile)
 	if err != nil {
 		return nil, err
@@ -121,7 +62,7 @@ func loadTransactions(c *config) ([]*transaction, error) {
 
 	csvReader := csv.NewReader(csvFile)
 
-	var transactions []*transaction
+	var transactions []*trade.Trade
 	for {
 		record, err := csvReader.Read()
 		if err == io.EOF {
@@ -132,7 +73,7 @@ func loadTransactions(c *config) ([]*transaction, error) {
 		if record[0] == "DATE" || record[0] == "***END OF FILE***" {
 			continue
 		}
-		nextTransaction, err := newTransactionTDA(record)
+		nextTransaction, err := trade.NewTradeTDA(record)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Skipping invalid transaction due to: %v\n", err)
 		}
@@ -146,10 +87,10 @@ func loadTransactions(c *config) ([]*transaction, error) {
 // value is a list of pointers to transactions with the same symbol.
 //
 // this function will ignore transactions with a blank symbol
-func groupSymbols(trans []*transaction) map[string][]*transaction {
-	var results = make(map[string][]*transaction)
+func groupSymbols(trans []*trade.Trade) map[string][]*trade.Trade {
+	var results = make(map[string][]*trade.Trade)
 	for i := 0; i < len(trans); i++ {
-		var t *transaction = trans[i]
+		var t *trade.Trade = trans[i]
 		trimmedSymbol := strings.TrimSpace(t.Symbol)
 		// guard clause to ignore any blank symbol transactions
 		if len(trimmedSymbol) == 0 {
@@ -162,7 +103,7 @@ func groupSymbols(trans []*transaction) map[string][]*transaction {
 			results[trimmedSymbol] = append(transactionList, t)
 		} else {
 			// first time encountering symbol, make a new entry
-			transactionList := make([]*transaction, 1)
+			transactionList := make([]*trade.Trade, 1)
 			transactionList[0] = t
 			results[trimmedSymbol] = transactionList
 		}
@@ -175,18 +116,28 @@ func groupSymbols(trans []*transaction) map[string][]*transaction {
 //
 // returns a mapping of symbols to a list of related symbols
 // found in the input grouping of transactions.
-func groupRelatedSymbols(groupedTransactions map[string][]*transaction) (results map[string][]string) {
+func groupRelatedSymbols(groupedTransactions map[string][]*trade.Trade) (results map[string][]string) {
 	results = make(map[string][]string)
 
 	for s := range groupedTransactions {
+		// added to make sure anything with only options tickers still gets grouped
+		parsedSymbol := strings.Split(s, " ")[0]
+		if results[parsedSymbol] != nil {
+			continue
+		}
+		// fmt.Fprintf(os.Stdout, "Parsed symbol: %v\n",parsedSymbol)
 		relatedSymbols := make([]string, 0)
 		for symbol := range groupedTransactions {
-			if symbol != s && strings.HasPrefix(symbol, s+" ") {
+			isRelatedOption := strings.HasPrefix(symbol, parsedSymbol+" ")
+			isRelatedUnderlying := strings.Compare(symbol, parsedSymbol) == 0
+
+			if isRelatedOption || isRelatedUnderlying  {
+				// fmt.Fprintf(os.Stdout, "\t%v: %v\n", s,symbol)
 				relatedSymbols = append(relatedSymbols, symbol)
 			}
 		}
 		if len(relatedSymbols) > 0 {
-			results[s] = relatedSymbols
+			results[parsedSymbol] = relatedSymbols
 		}
 	}
 
@@ -198,7 +149,7 @@ type CostBasis struct {
 	Position         *big.Float     // total open position of this cost basis excluding related positions
 	PL               *big.Float     // total profit/loss of this position excluding P/L from related positions
 	EffPL            *big.Float     // the total profit/loss of this position including P/L from related positions
-	Transactions     []*transaction // list of transactions for this symbol
+	Transactions     []*trade.Trade // list of transactions for this symbol
 	RelatedPositions []*CostBasis   // related positions cost basis (eg options Cost basis related to an underlying position)
 }
 
@@ -208,7 +159,7 @@ type CostBasis struct {
 //
 // as part of the construction, the open position amount and total P/L
 // is computed.
-func newCostBasis(symbol string, trans []*transaction) *CostBasis {
+func newCostBasis(symbol string, trans []*trade.Trade) *CostBasis {
 	e := CostBasis{
 		Symbol:           symbol,
 		Transactions:     trans,
@@ -285,7 +236,7 @@ func (e *CostBasis) appendCostBasis(cb *CostBasis) {
 // buys/sells
 //
 // currently, this function ignores shares positions that have been closed.
-func getEffectiveCostBasis(relatedSymbols map[string][]string, groupedTransactions map[string][]*transaction) []*CostBasis {
+func getEffectiveCostBasis(relatedSymbols map[string][]string, groupedTransactions map[string][]*trade.Trade) []*CostBasis {
 	results := make([]*CostBasis, 0)
 	visitedSymbols := make(map[string]bool)
 	// first group up every symbol with related symbols
