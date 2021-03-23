@@ -4,12 +4,10 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"math/big"
+	// "math/big"
 	"os"
 	"strings"
-	"github.com/stonks/trade"
 )
 
 // config holds configurable values
@@ -52,8 +50,8 @@ func getConfigs() (*config, error) {
 }
 
 // loadTransactions loads the csv transactions from
-// the file specified in the configs.
-func loadTransactions(c *config) ([]*trade.Trade, error) {
+// the file specified in the configs as maps 
+func loadTransactions(c *config) ([]map[string]string, error) {
 	csvFile, err := os.Open(c.TransactionsFile)
 	if err != nil {
 		return nil, err
@@ -62,261 +60,46 @@ func loadTransactions(c *config) ([]*trade.Trade, error) {
 
 	csvReader := csv.NewReader(csvFile)
 
-	var transactions []*trade.Trade
-	for {
-		record, err := csvReader.Read()
-		if err == io.EOF {
-			break
+	rawTransactions, err := csvReader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	
+	transactions := make([]map[string]string, 10)
+	// convert each row to a key value map 
+	headerRow := rawTransactions[0]
+	for i:=1; i< len(rawTransactions); i++ {
+		rawRecord := rawTransactions[i]
+		newRecord := make(map[string]string)
+		for j:=0;j<len(headerRow);j++{
+			fieldName := headerRow[j]
+			fieldValue := rawRecord[j]
+			newRecord[fieldName] = fieldValue
 		}
 
-		// skip first row
-		if record[0] == "DATE" || record[0] == "***END OF FILE***" {
-			continue
-		}
-		nextTransaction, err := trade.NewTradeTDA(record)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Skipping invalid transaction due to: %v\n", err)
-		}
-		transactions = append(transactions, nextTransaction)
+		transactions = append(transactions, newRecord)
 	}
 	return transactions, nil
 }
 
-// groupSymbols organizes a list of transactions by their symbol.
-// the function returns a map whose key's are the symbol and the
-// value is a list of pointers to transactions with the same symbol.
-//
-// this function will ignore transactions with a blank symbol
-func groupSymbols(trans []*trade.Trade) map[string][]*trade.Trade {
-	var results = make(map[string][]*trade.Trade)
-	for i := 0; i < len(trans); i++ {
-		var t *trade.Trade = trans[i]
-		trimmedSymbol := strings.TrimSpace(t.Symbol)
-		// guard clause to ignore any blank symbol transactions
-		if len(trimmedSymbol) == 0 {
-			continue
-		}
 
-		if results[trimmedSymbol] != nil {
-			// previously found symbol, append this transaction
-			transactionList := results[trimmedSymbol]
-			results[trimmedSymbol] = append(transactionList, t)
+// groups transactions according to underlying symbol
+func groupTransactionsByUnderlying(transactions *[]map[string]string) (map[string][]map[string]string) {
+	
+	results := make(map[string][]map[string]string)
+	for i:= 0; i<len(*transactions); i++ {
+		// for options, first full word will be the underlyign symbol
+		transaction := (*transactions)[i]
+		symbol := strings.Split(transaction["SYMBOL"], " ")[0]
+		if _,exists := results[symbol]; exists {
+			results[symbol] = append(results[symbol],transaction)
 		} else {
-			// first time encountering symbol, make a new entry
-			transactionList := make([]*trade.Trade, 1)
-			transactionList[0] = t
-			results[trimmedSymbol] = transactionList
+			resultSlice := make([]map[string]string, 0)
+			resultSlice = append(resultSlice, transaction)
+			results[symbol] = resultSlice
 		}
-	}
-
-	return results
-}
-
-// groupRelatedSymbols is used to identify related options and underlying symbols.
-//
-// returns a mapping of symbols to a list of related symbols
-// found in the input grouping of transactions.
-func groupRelatedSymbols(groupedTransactions map[string][]*trade.Trade) (results map[string][]string) {
-	results = make(map[string][]string)
-
-	for s := range groupedTransactions {
-		// added to make sure anything with only options tickers still gets grouped
-		parsedSymbol := strings.Split(s, " ")[0]
-		if results[parsedSymbol] != nil {
-			continue
-		}
-		// fmt.Fprintf(os.Stdout, "Parsed symbol: %v\n",parsedSymbol)
-		relatedSymbols := make([]string, 0)
-		for symbol := range groupedTransactions {
-			isRelatedOption := strings.HasPrefix(symbol, parsedSymbol+" ")
-			isRelatedUnderlying := strings.Compare(symbol, parsedSymbol) == 0
-
-			if isRelatedOption || isRelatedUnderlying  {
-				// fmt.Fprintf(os.Stdout, "\t%v: %v\n", s,symbol)
-				relatedSymbols = append(relatedSymbols, symbol)
-			}
-		}
-		if len(relatedSymbols) > 0 {
-			results[parsedSymbol] = relatedSymbols
-		}
-	}
-
-	return results
-}
-
-type CostBasis struct {
-	Symbol           string         // ticker symbol
-	Position         *big.Float     // total open position of this cost basis excluding related positions
-	PL               *big.Float     // total profit/loss of this position excluding P/L from related positions
-	EffPL            *big.Float     // the total profit/loss of this position including P/L from related positions
-	Transactions     []*trade.Trade // list of transactions for this symbol
-	RelatedPositions []*CostBasis   // related positions cost basis (eg options Cost basis related to an underlying position)
-}
-
-// newEffCostBasis returns a pointer to a new struct for details about
-// the effective cost basis of a symbol given the symbol and a list
-// of transactions.
-//
-// as part of the construction, the open position amount and total P/L
-// is computed.
-func newCostBasis(symbol string, trans []*trade.Trade) *CostBasis {
-	e := CostBasis{
-		Symbol:           symbol,
-		Transactions:     trans,
-		RelatedPositions: make([]*CostBasis, 0),
-	}
-
-	openPos := big.NewFloat(0.0)
-	totalPl := big.NewFloat(0.0)
-	for i := 0; i < len(trans); i++ {
-		t := trans[i]
-		if t != nil {
-			openPos = openPos.Add(openPos, t.Quantity)
-			totalPl = totalPl.Add(totalPl, t.Amount)
-		}
-	}
-	e.Position = openPos
-	e.PL = totalPl
-	e.EffPL = totalPl.Copy(totalPl)
-
-	return &e
-}
-
-// getAvgCost returns the average price of each open unit of the position.
-// does not account for effective profit/loss from related positions
-func (e *CostBasis) getAvgCost() *big.Float {
-	avgCost := big.NewFloat(0.0)
-	avgCost = avgCost.Quo(e.PL, e.Position)
-	return avgCost
-}
-
-// getEffAvgCost returns the average price of each open unit of the position.
-// does not account for effective profit/loss from related positions
-func (e *CostBasis) getEffAvgCost() *big.Float {
-	avgCost := big.NewFloat(0.0)
-	avgCost = avgCost.Quo(e.EffPL, e.Position)
-	return avgCost
-}
-
-// appendCostBasis adds a cost basis as a related cost basis to the
-// receiving struct. This is primarily used to add a cost basis for
-// a option contract as a related cost basis to the underlying ticker
-func (e *CostBasis) appendCostBasis(cb *CostBasis) {
-	e.RelatedPositions = append(e.RelatedPositions, cb)
-	// recompute effective PL
-	updatedEffPL := big.NewFloat(0.0)
-	updatedEffPL = updatedEffPL.Copy(e.PL)
-	for i := 0; i < len(e.RelatedPositions); i++ {
-		rp := e.RelatedPositions[i]
-		if rp == nil {
-			continue
-		}
-		updatedEffPL = updatedEffPL.Add(updatedEffPL, rp.PL)
-	}
-	e.EffPL = updatedEffPL.Copy(updatedEffPL)
-}
-
-// getEffectiveCostBasis computes the effective cost basis for all symbols that currently have
-// an open position.
-//
-// this is achieved by first computing the cost basis of the shares position from the purchase
-// of the shares, then applying any profits/losses from transactions on related symbols.
-//
-// for example, take a position of 100 AMD shares bought at $70. initial cost basis is $7000
-// if there are transactions for a covered call AMD $75c that total a profit of $100, this function
-// would compute the effective cost basis of the AMD shares as being $6900.
-//
-// if the position of shares has been bought and sold multiple times, this function will compute the
-// cost basis of the shares (before factoring in options profit/loss) as the sum of all P/L from all
-// transactions for the shares.
-//
-// so if AMD has 3 transactions, BUY 100 shares for $7000, SELL 100 shares for $7500, BUY 100 shares
-// for $7600, this function will compute the shares cost basis as (-7000 + 7500 - 7600) = 7100. This is
-// done to compute an accurate picture of the amount of money made or lost on the position across multiple
-// buys/sells
-//
-// currently, this function ignores shares positions that have been closed.
-func getEffectiveCostBasis(relatedSymbols map[string][]string, groupedTransactions map[string][]*trade.Trade) []*CostBasis {
-	results := make([]*CostBasis, 0)
-	visitedSymbols := make(map[string]bool)
-	// first group up every symbol with related symbols
-	for symbol, relatedSymbols := range relatedSymbols {
-		// guard clause: skip already visited symbols
-		if visitedSymbols[symbol] {
-			continue
-		}
-
-		symbolTransactions := groupedTransactions[symbol]
-		effCB := newCostBasis(symbol, symbolTransactions)
-		visitedSymbols[symbol] = true
-
-		for relatedSymbolIdx := 0; relatedSymbolIdx < len(relatedSymbols); relatedSymbolIdx++ {
-			relatedSymbol := relatedSymbols[relatedSymbolIdx]
-			if visitedSymbols[relatedSymbol] {
-				continue
-			}
-			visitedSymbols[relatedSymbol] = true
-			transactions := groupedTransactions[relatedSymbol]
-			relatedEffCB := newCostBasis(relatedSymbol, transactions)
-			effCB.appendCostBasis(relatedEffCB)
-		}
-		results = append(results, effCB)
-	}
-
-	// find any symbols that weren't included in the related symbols search and add those
-	for symbol, transactions := range groupedTransactions {
-		// guard clause: skip anything we already processed
-		if visitedSymbols[symbol] {
-			continue
-		}
-		effCB := newCostBasis(symbol, transactions)
-		results = append(results, effCB)
 	}
 	return results
-}
-
-type TransactionStats struct {
-	CostBasis             []*CostBasis
-	ProfitablePositionPct *big.Float //percentage of cost basis' that ended up being profitable
-	LargestGainPosition   *CostBasis //the cost basis with the largest profit
-	LargestLossPosition   *CostBasis //the cost basis with the largest loss
-}
-
-func newTransactionStats(cb []*CostBasis) *TransactionStats {
-	ts := TransactionStats{
-		CostBasis: cb,
-	}
-
-	// compute profitability pct
-	totalCostBasis := big.NewFloat(float64(len(cb)))
-	ZERO := big.NewFloat(0.0)
-	ONE := big.NewFloat(1.0)
-	HUNDRED := big.NewFloat(100.0)
-	profitPosPct := big.NewFloat(0.0)
-	var largestGain *CostBasis
-	var largestLoss *CostBasis
-
-	for i := 0; i < len(cb); i++ {
-		position := cb[i]
-		if position.EffPL.Cmp(ZERO) > 0 {
-			profitPosPct = profitPosPct.Add(profitPosPct, ONE)
-		}
-		// only count zero'd out positions towards largest gain/loss
-		if position.Position.Cmp(ZERO) == 0 {
-			if largestGain == nil || position.EffPL.Cmp(largestGain.EffPL) > 0 {
-				largestGain = position
-			}
-			if (largestLoss == nil || ( position.EffPL.Cmp(ZERO) < 0 && position.EffPL.Cmp(largestLoss.EffPL) < 0)) {
-				largestLoss = position
-			}
-		}
-	}
-
-	profitPosPct = profitPosPct.Quo(profitPosPct, totalCostBasis).Mul(profitPosPct, HUNDRED)
-	ts.ProfitablePositionPct = profitPosPct
-	ts.LargestGainPosition = largestGain
-	ts.LargestLossPosition = largestLoss
-	return &ts
 }
 
 func main() {
@@ -332,17 +115,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	groupedSymbols := groupSymbols(transactions)
+	grouped := groupTransactionsByUnderlying(&transactions)
 
-	relatedSymbols := groupRelatedSymbols(groupedSymbols)
-
-	cb := getEffectiveCostBasis(relatedSymbols, groupedSymbols)
-	stats := newTransactionStats(cb)
-	jsonStats, err := json.Marshal(stats)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error serializing output: %v", err)
-		os.Exit(2)
-	}
-
-	fmt.Fprintf(os.Stdout, "%v", string(jsonStats))
+	json.NewEncoder(os.Stdout).Encode(grouped)
 }
