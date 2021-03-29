@@ -102,6 +102,36 @@ func groupTransactionsByUnderlying(transactions *[]map[string]string) (map[strin
 	return results
 }
 
+// groupOptionExpDt finds transactions that indicate an options spread. An options 
+// spread is identified by 2 or more options that have the same date of expiration and 
+// same underlying symbol
+func groupOptionExpDt(transactions *[]map[string]string)(map[string][]map[string]string){
+	
+	optionsTransactions := make(map[string][]map[string]string)
+	
+	for t:= 0; t<len(*transactions); t++ {
+		transaction := (*transactions)[t]
+		symbol := transaction["SYMBOL"]
+		symbolToks := strings.Split(symbol," ")
+		isOptionsTransaction := len(symbolToks) > 1
+		if isOptionsTransaction {
+			// pop the expiration date from the symbol 
+			expireDt := symbolToks[1] + " " + symbolToks [2] + " " +symbolToks[3]
+			if transactionList,exists := optionsTransactions[expireDt]; exists {
+				transactionList := append(transactionList, transaction);
+				optionsTransactions[expireDt] = transactionList
+			} else {
+				transactionList := make([]map[string]string, 0);
+				transactionList = append(transactionList, transaction)
+				optionsTransactions[expireDt] = transactionList
+			}
+		}
+	}
+	return optionsTransactions
+}
+
+// TODO refactor everything to not use maps everywhere 
+
 func main() {
 	configs, err := getConfigs()
 	if err != nil {
@@ -116,6 +146,12 @@ func main() {
 	}
 
 	grouped := groupTransactionsByUnderlying(&transactions)
-
-	json.NewEncoder(os.Stdout).Encode(grouped)
+	optionsTxs := make(map[string]map[string][]map[string]string)
+	for symbol, transactions := range grouped {
+		options := groupOptionExpDt(&transactions)
+		if len(options) > 0 {
+			optionsTxs[symbol] = options
+		}
+	}
+	json.NewEncoder(os.Stdout).Encode(optionsTxs)
 }
