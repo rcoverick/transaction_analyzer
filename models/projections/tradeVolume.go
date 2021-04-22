@@ -1,5 +1,3 @@
-// projections contains structs that represent projections 
-// derived from transactions.
 package projections 
 
 import (

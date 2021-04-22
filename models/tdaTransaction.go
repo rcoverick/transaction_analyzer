@@ -1,5 +1,5 @@
-// tda_models contains structs and parsing functions for 
-// representing data from tdameritrade.
+// tdaTransaction contains structs and parsing functions for 
+// representing data from tdameritrade transactions.
 package models
 import (
 	"time"
