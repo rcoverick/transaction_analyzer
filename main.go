@@ -100,6 +100,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	
-	json.NewEncoder(os.Stdout).Encode(transactions)
+	// for demo purposes, get list of all underlyings traded
+	underlyings := make(map[string]interface{}, 0)
+	for t:= 0; t<len(transactions); t++ {
+		transaction := transactions[t]
+		underlyings[transaction.GetUnderlyingSymbol()] = nil
+	}
+	fmt.Println("Companies/tickers traded:")
+	for k, _ := range underlyings {
+		fmt.Println("\t",k)
+	}
+	// json.NewEncoder(os.Stdout).Encode(transactions)
 }

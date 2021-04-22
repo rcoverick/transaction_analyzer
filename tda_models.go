@@ -4,6 +4,7 @@ package main
 import (
 	"time"
 	"strconv"
+	"strings"
 )
 
 type Transaction struct {
@@ -66,4 +67,13 @@ func NewTransaction(csvRow *map[string]string) (*Transaction, error) {
 	}
 
 	return &t, nil 
+}
+
+// GetUnderlyingSymbol returns the symbol of the underlying instrument 
+// for which a transaction applies. For normal stocks like "AAPL", this will
+// just be the same as the symbol field in the transaction. For transactions that
+// are trading derivatives such as options, the symbol of the underlying 
+// will be derived from the symbol of the derivative being traded
+func (t *Transaction) GetUnderlyingSymbol()(underlying string) {
+	return strings.Split(t.Symbol," ")[0]
 }
