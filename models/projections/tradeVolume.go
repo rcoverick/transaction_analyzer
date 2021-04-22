@@ -1,6 +1,10 @@
 // projections contains structs that represent projections 
 // derived from transactions.
-package main 
+package projections 
+
+import (
+	"github.com/rcoverick/stonks/models"
+)
 
 type TradeVolume struct {
 	TotalTrades map[string]int 
@@ -15,7 +19,7 @@ func NewTradeVolume()(*TradeVolume) {
 
 // CountTransactionCommand accepts a transaction and updates the state 
 // of the TradeVolume to reflect the new transaction. 
-func (tv *TradeVolume) CountTransactionCommand(t *Transaction) {
+func (tv *TradeVolume) CountTransactionCommand(t *models.Transaction) {
 	symbol := t.GetUnderlyingSymbol()
 	if tradeCount, exists := tv.TotalTrades[symbol]; exists {
 		tv.TotalTrades[symbol] = tradeCount + 1;

@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	// "math/big"
+	"github.com/rcoverick/stonks/models"
+	"github.com/rcoverick/stonks/models/projections"
 	"os"
 )
 
@@ -50,7 +51,7 @@ func getConfigs() (*config, error) {
 
 // loadTransactions loads the csv transactions from
 // the file specified in the configs as maps 
-func loadTransactions(c *config) ([]*Transaction, error) {
+func loadTransactions(c *config) ([]*models.Transaction, error) {
 	csvFile, err := os.Open(c.TransactionsFile)
 	if err != nil {
 		return nil, err
@@ -64,7 +65,7 @@ func loadTransactions(c *config) ([]*Transaction, error) {
 		return nil, err
 	}
 	
-	transactions := make([]*Transaction, 0)
+	transactions := make([]*models.Transaction, 0)
 	// convert each row to a key value map 
 	headerRow := rawTransactions[0]
 	for i:=1; i< len(rawTransactions); i++ {
@@ -75,7 +76,7 @@ func loadTransactions(c *config) ([]*Transaction, error) {
 			fieldValue := rawRecord[j]
 			newRecord[fieldName] = fieldValue
 		}
-		transaction, err := NewTransaction(&newRecord)
+		transaction, err := models.NewTransaction(&newRecord)
 		if err != nil {
 			fmt.Errorf("Invalid transaction: %v",err)
 			continue
@@ -100,7 +101,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	tradeVolumes := NewTradeVolume() 
+	tradeVolumes := projections.NewTradeVolume() 
 	for t:= 0; t<len(transactions); t++ {
 		transaction := transactions[t]
 		tradeVolumes.CountTransactionCommand(transaction) 

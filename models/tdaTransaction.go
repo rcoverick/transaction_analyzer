@@ -1,6 +1,6 @@
 // tda_models contains structs and parsing functions for 
 // representing data from tdameritrade.
-package main
+package models
 import (
 	"time"
 	"strconv"
