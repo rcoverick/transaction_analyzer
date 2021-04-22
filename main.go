@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	// "math/big"
 	"os"
-	"strings"
 )
 
 // config holds configurable values
@@ -101,13 +100,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	grouped := groupTransactionsByUnderlying(&transactions)
-	optionsTxs := make(map[string]map[string][]map[string]string)
-	for symbol, transactions := range grouped {
-		options := groupOptionExpDt(&transactions)
-		if len(options) > 0 {
-			optionsTxs[symbol] = options
-		}
-	}
-	json.NewEncoder(os.Stdout).Encode(optionsTxs)
+	
+	json.NewEncoder(os.Stdout).Encode(transactions)
 }
