@@ -51,7 +51,7 @@ func getConfigs() (*config, error) {
 
 // loadTransactions loads the csv transactions from
 // the file specified in the configs as maps 
-func loadTransactions(c *config) ([]map[string]string, error) {
+func loadTransactions(c *config) ([]*Transaction, error) {
 	csvFile, err := os.Open(c.TransactionsFile)
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func loadTransactions(c *config) ([]map[string]string, error) {
 		return nil, err
 	}
 	
-	transactions := make([]map[string]string, 10)
+	transactions := make([]*Transaction, 0)
 	// convert each row to a key value map 
 	headerRow := rawTransactions[0]
 	for i:=1; i< len(rawTransactions); i++ {
@@ -76,61 +76,17 @@ func loadTransactions(c *config) ([]map[string]string, error) {
 			fieldValue := rawRecord[j]
 			newRecord[fieldName] = fieldValue
 		}
+		transaction, err := NewTransaction(&newRecord)
+		if err != nil {
+			fmt.Errorf("Invalid transaction: %v",err)
+			continue
+		}
 
-		transactions = append(transactions, newRecord)
+		transactions = append(transactions, transaction)
 	}
 	return transactions, nil
 }
 
-
-// groups transactions according to underlying symbol
-func groupTransactionsByUnderlying(transactions *[]map[string]string) (map[string][]map[string]string) {
-	
-	results := make(map[string][]map[string]string)
-	for i:= 0; i<len(*transactions); i++ {
-		// for options, first full word will be the underlyign symbol
-		transaction := (*transactions)[i]
-		symbol := strings.Split(transaction["SYMBOL"], " ")[0]
-		if _,exists := results[symbol]; exists {
-			results[symbol] = append(results[symbol],transaction)
-		} else {
-			resultSlice := make([]map[string]string, 0)
-			resultSlice = append(resultSlice, transaction)
-			results[symbol] = resultSlice
-		}
-	}
-	return results
-}
-
-// groupOptionExpDt finds transactions that indicate an options spread. An options 
-// spread is identified by 2 or more options that have the same date of expiration and 
-// same underlying symbol
-func groupOptionExpDt(transactions *[]map[string]string)(map[string][]map[string]string){
-	
-	optionsTransactions := make(map[string][]map[string]string)
-	
-	for t:= 0; t<len(*transactions); t++ {
-		transaction := (*transactions)[t]
-		symbol := transaction["SYMBOL"]
-		symbolToks := strings.Split(symbol," ")
-		isOptionsTransaction := len(symbolToks) > 1
-		if isOptionsTransaction {
-			// pop the expiration date from the symbol 
-			expireDt := symbolToks[1] + " " + symbolToks [2] + " " +symbolToks[3]
-			if transactionList,exists := optionsTransactions[expireDt]; exists {
-				transactionList := append(transactionList, transaction);
-				optionsTransactions[expireDt] = transactionList
-			} else {
-				transactionList := make([]map[string]string, 0);
-				transactionList = append(transactionList, transaction)
-				optionsTransactions[expireDt] = transactionList
-			}
-		}
-	}
-	return optionsTransactions
-}
-
-// TODO refactor everything to not use maps everywhere 
 
 func main() {
 	configs, err := getConfigs()
